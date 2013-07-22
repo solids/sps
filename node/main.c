@@ -4,58 +4,22 @@
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
-#include "I2C_Slave.h"
+#include "TWI_Slave.h"
+#include <string.h>
+#include <util/delay.h>
 
 #define CPS 65535
+
+#define TWI_CMD_MASTER_WRITE 0x10
+#define TWI_CMD_MASTER_READ  0x20
 
 volatile uint8_t color = 0;
 volatile uint8_t light = 0;
 
-uint8_t leds[4][3] = {
-  { 1, 0, 0},
-  { 1, 0, 0},
-  { 0, 0, 0},
-  { 0, 0, 0}
-};
-
-volatile uint8_t currentSensor = 0;
-
-// ISR(ADC_vect) {
-//   unsigned int result   = ADC;  // Read the ADC Result
-//   ADCSRA |=(1 << ADIF);         // Acknowledge the ADC Interrupt Flag
-
-//   if (result > 512) {
-//     leds[0][0] = 1024;
-//   } else {
-//     leds[0][0] = 0;
-//   }
-
-// //  currentSensor++;
-
-//   // ADMUX |= (0xf0 | currentSensor);
-
-//   // if (currentSensor > 8) {
-//   //   currentSensor = 0;
-//   // }
-// }
-
 ISR(TIMER1_OVF_vect) {
 
   PORTB &= 0xF0;
-  PORTB |= (1 << light);
-  // if (leds[light][0]) {
-  //   PORTB |= (1 << light);
-  //   PORTD = 0xff ^ _BV(6);
-  // }
-
-  // light++;
-  // if (light > 3) {
-  //   light = 0;
-  // }
-
-
-
-  // TCNT1 = 61000;
+  PORTB ^= (1 << light);
 
   PORTD |= _BV(3) | _BV(5) | _BV(6);
 
@@ -74,15 +38,10 @@ ISR(TIMER1_OVF_vect) {
   }
 
 
-
   light++;
   if (light > 3) {
-    light = 0;
-    color++;
-    if (color > 2) {
-      color = 0;
-    }
-  }
+     light = 0;
+   }
 }
 
 void chain_disable() {
@@ -96,29 +55,47 @@ void chain_enable() {
 
 int main() {
   DDRB = 0xFF;
-  PORTB = 0xFF;
+  PORTB = 0xF0;
   DDRD = 0xFF;
 
   chain_disable();
 
-  // ADCSRA   = 0b10101100;  // Enable ADC with Clock prescaled by 16 ; If Clock speed is 8MHz, then ADC clock = 8MHz/16 = 500kHz
-  // ADCSRB   = 0b00000000;  // Free Running ADC mode
-  // DIDR0    = 0b00111111;  // Disable Digital Input on ADC Channel 0 to reduce power consumption
-  // ADMUX    = 0b11000000;  // Disable Left-Adjust and select Internal 1.1V reference and ADC Channel 0 as input
-
-  TCCR1B |= (1 << CS11);
-  TIMSK1 |= (1 << TOIE1);
-  //TCNT1 = 64000;
-
-  I2C_init(0x00);
+  TWI_Slave_Initialise( (unsigned char)((0x00<<TWI_ADR_BITS) | (TRUE<<TWI_GEN_BIT) ));
 
   sei();
 
-  // ADCSRA  |= (1<<ADSC);  // Start ADC Conversion
+  TWI_Start_Transceiver();
+
+  unsigned char messageBuf[TWI_BUFFER_SIZE];
+  uint8_t myaddr = 0, sentack = 0;
 
   for (;;) {
 
+    if (!TWI_Transceiver_Busy() && TWI_statusReg.lastTransOK) {
 
+      if (!myaddr) {
+        if (TWI_statusReg.RxDataInBuf) {
+
+          TWI_Get_Data_From_Transceiver(messageBuf, 1);
+
+          myaddr = (uint8_t)messageBuf[0];
+          color = myaddr%3;
+          cli();
+          TWI_Slave_Initialise( (unsigned char)((myaddr<<TWI_ADR_BITS) | (TRUE<<TWI_GEN_BIT) ));
+          sei();
+
+          TWI_Start_Transceiver();
+          TCCR1B |= (1 << CS11);
+          TIMSK1 |= (1 << TOIE1);
+        }
+      } else if (!sentack) {
+        sentack = 1;
+        messageBuf[0] = myaddr;
+        TWI_Start_Transceiver_With_Data( messageBuf, 1 );
+      } else {
+        // TODO: protocol
+      }
+    }
   }
 
   return 0;
