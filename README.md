@@ -3,6 +3,8 @@ sps
 
 solids pressure sensitive buttons
 
+![img](http://i.imgur.com/ZL2aXJU.jpg)
+
 
 ## brain
 
